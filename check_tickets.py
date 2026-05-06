@@ -66,12 +66,14 @@ def fetch_berlin_events() -> list[dict]:
     seen_ids = set()
     results = []
 
-    # Primary + all sources for DE
-    for source in ["ticketmaster,tmr,universe,frontgate", "tmr"]:
-        params = {"apikey": TM_API_KEY, "keyword": "james blake", "source": source}
-        if source != "tmr":
-            params["countryCode"] = "DE"
+    queries = [
+        # Primary — no source filter (catches mfx-de and all DE sources)
+        {"apikey": TM_API_KEY, "keyword": "james blake", "countryCode": "DE"},
+        # TMR resale — no countryCode (TMR is global, DE resale may appear here)
+        {"apikey": TM_API_KEY, "keyword": "james blake", "source": "tmr"},
+    ]
 
+    for params in queries:
         try:
             resp = requests.get(
                 "https://app.ticketmaster.com/discovery/v2/events.json",
@@ -86,7 +88,7 @@ def fetch_berlin_events() -> list[dict]:
                     seen_ids.add(key)
                     results.append(ev)
         except Exception as e:
-            print(f"  API query ({source}) failed: {e}")
+            print(f"  API query failed: {e}")
 
     return results
 
