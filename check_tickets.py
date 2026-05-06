@@ -5,23 +5,34 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
-from bs4 import BeautifulSoup
 
-URL = "https://www.ticketmaster.de/artist/james-blake-tickets/765513"
-STATE_FILE = Path("state.json")
-BERLIN_IDS = {"953422232": "Berlin Oct 15", "352305340": "Berlin Oct 16"}
-
+TM_API_KEY = os.environ.get("TICKETMASTER_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+STATE_FILE = Path("state.json")
+
+BERLIN_EVENT_IDS = {
+    "Z698xZC2Z1kPK8xFw": "Berlin Oct 15 (Astra Kulturhaus)",
+    "Z698xZC2Z1ku3GAuZ": "Berlin Oct 16 (Astra Kulturhaus)",
 }
+
+AVAILABLE_STATUSES = {"onsale", "rescheduled"}
+UNAVAILABLE_STATUSES = {"offsale", "cancelled", "postponed"}
+
+
+def fetch_events() -> list[dict]:
+    resp = requests.get(
+        "https://app.ticketmaster.com/discovery/v2/events.json",
+        params={
+            "apikey": TM_API_KEY,
+            "keyword": "james blake",
+            "countryCode": "DE",
+        },
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return resp.json().get("_embedded", {}).get("events", [])
 
 
 def send_telegram(message: str):
@@ -47,74 +58,52 @@ def save_state(state: dict):
     STATE_FILE.write_text(json.dumps(state, indent=2))
 
 
-def fetch_events() -> list[dict]:
-    resp = requests.get(URL, headers=HEADERS, timeout=20)
-    resp.raise_for_status()
-
-    soup = BeautifulSoup(resp.text, "html.parser")
-    tag = soup.find("script", id="__NEXT_DATA__")
-    if not tag:
-        raise RuntimeError("__NEXT_DATA__ not found — page structure changed")
-
-    data = json.loads(tag.string)
-    events = data["props"]["pageProps"]["initialReduxState"]["api"]
-
-    results = []
-    for ev in events:
-        ev_id = ev.get("id", "")
-        if ev_id not in BERLIN_IDS:
-            continue
-        results.append({
-            "id": ev_id,
-            "name": BERLIN_IDS[ev_id],
-            "url": ev.get("url", ""),
-            "soldOut": ev.get("soldOut", True),
-            "limitedAvailability": ev.get("limitedAvailability", False),
-            "cancelled": ev.get("cancelled", False),
-            "available": not ev.get("soldOut", True) and not ev.get("cancelled", False),
-        })
-
-    return results
-
-
 def main():
+    if not TM_API_KEY:
+        print("Missing TICKETMASTER_API_KEY")
+        sys.exit(1)
+
     print(f"[{datetime.now().isoformat()}] Checking James Blake Berlin tickets...")
 
     try:
         events = fetch_events()
     except Exception as e:
-        print(f"Fetch failed: {e}")
+        print(f"API call failed: {e}")
         sys.exit(1)
 
-    print(f"Berlin events found: {len(events)}")
-    for ev in events:
-        print(f"  {ev['name']}: soldOut={ev['soldOut']} limited={ev['limitedAvailability']} cancelled={ev['cancelled']}")
+    # Filter to only Berlin events we care about
+    berlin = [e for e in events if e["id"] in BERLIN_EVENT_IDS]
+    print(f"Berlin events found: {len(berlin)}")
 
     state = load_state()
-    changed = []
+    newly_available = []
 
-    for ev in events:
-        key = ev["id"]
-        prev = state.get(key, {}).get("available")
-        curr = ev["available"]
+    for ev in berlin:
+        ev_id = ev["id"]
+        label = BERLIN_EVENT_IDS[ev_id]
+        status = ev["dates"]["status"]["code"]
+        url = ev.get("url", "")
+        available = status in AVAILABLE_STATUSES
 
-        if curr and prev is not True:
-            changed.append(ev)
+        prev_available = state.get(ev_id, {}).get("available")
+        print(f"  {label}: status={status} available={available} (prev={prev_available})")
 
-        state[key] = {
-            "available": curr,
-            "soldOut": ev["soldOut"],
-            "limitedAvailability": ev["limitedAvailability"],
+        # Notify only on transition to available
+        if available and prev_available is not True:
+            newly_available.append({"label": label, "status": status, "url": url})
+
+        state[ev_id] = {
+            "available": available,
+            "status": status,
             "last_check": datetime.now().isoformat(),
         }
 
     save_state(state)
 
-    if changed:
+    if newly_available:
         lines = ["🎵 <b>James Blake Berlin — Tickets Available!</b>\n"]
-        for ev in changed:
-            label = "LIMITED" if ev["limitedAvailability"] else "AVAILABLE"
-            lines.append(f"📅 <b>{ev['name']}</b> — {label}")
+        for ev in newly_available:
+            lines.append(f"📅 <b>{ev['label']}</b> — {ev['status'].upper()}")
             lines.append(f"🔗 {ev['url']}\n")
         send_telegram("\n".join(lines))
         print("Telegram notification sent.")

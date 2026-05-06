@@ -2,21 +2,19 @@ name: Check James Blake Berlin Tickets
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # every 30 minutes
-  workflow_dispatch:           # manual trigger button in GitHub UI
+    - cron: "*/5 * * * *"   # every 5 minutes
+  workflow_dispatch:           # manual trigger in GitHub UI
 
 permissions:
-  contents: write              # needed to commit state.json back
+  contents: write
 
 jobs:
   check:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
       - uses: actions/setup-python@v5
         with:
@@ -26,8 +24,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run ticket check
+      - name: Check tickets
         env:
+          TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python check_tickets.py
