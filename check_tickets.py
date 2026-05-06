@@ -126,16 +126,20 @@ def main():
 
         print(f"  [{ev['source']}] {ev['label']}: {status} (was: {prev_status}) → available={available}")
 
-        if available and prev_available is not True:
+        # prev_available is None = first run, never seen before → skip, just record
+        if prev_available is None:
+            print(f"    First run — recording state, no alert.")
+        elif available and not prev_available:
+            # Was unavailable/soldout → now onsale = real change worth alerting
             notifications.append(
                 f"{tag} <b>{ev['label']}</b>\n"
                 f"Status: <b>{status.upper()}</b>\n"
                 f"🔗 {ev['url']}"
             )
-
-        if prev_available is True and not available:
+        elif prev_available and not available:
+            # Was onsale → now gone
             notifications.append(
-                f"❌ <b>{ev['label']}</b> [{ev['source']}] now <b>{status.upper()}</b>\n"
+                f"❌ <b>{ev['label']}</b> [{ev['source']}] → <b>{status.upper()}</b>\n"
                 f"Check: viagogo.com/de · stubhub.de · ticketswap.de"
             )
 
