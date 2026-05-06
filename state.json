@@ -8,5 +8,21 @@
     "available": true,
     "status": "onsale",
     "last_check": "2026-05-06T12:55:30.530274"
+  },
+  "953422232": {
+    "primary_available": true,
+    "resale_available": false,
+    "resale_count": 0,
+    "api_status": "onsale",
+    "sold_out": null,
+    "last_check": "2026-05-06T13:09:03.877934"
+  },
+  "352305340": {
+    "primary_available": true,
+    "resale_available": false,
+    "resale_count": 0,
+    "api_status": "onsale",
+    "sold_out": null,
+    "last_check": "2026-05-06T13:09:03.877953"
   }
 }
