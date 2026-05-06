@@ -10,19 +10,15 @@
     "last_check": "2026-05-06T12:55:30.530274"
   },
   "953422232": {
-    "primary_available": true,
-    "resale_available": false,
-    "resale_count": 0,
-    "api_status": "onsale",
-    "sold_out": null,
-    "last_check": "2026-05-06T13:10:46.187299"
+    "available": true,
+    "status": "onsale",
+    "sale_end": "2026-10-15T21:59:00Z",
+    "last_check": "2026-05-06T13:13:02.689552"
   },
   "352305340": {
-    "primary_available": true,
-    "resale_available": false,
-    "resale_count": 0,
-    "api_status": "onsale",
-    "sold_out": null,
-    "last_check": "2026-05-06T13:10:46.187317"
+    "available": true,
+    "status": "onsale",
+    "sale_end": "2026-10-16T21:59:00Z",
+    "last_check": "2026-05-06T13:13:02.689567"
   }
 }
