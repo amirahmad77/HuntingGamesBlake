@@ -2,16 +2,16 @@ name: Check James Blake Berlin Tickets
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # every 5 minutes
-  workflow_dispatch:           # manual trigger in GitHub UI
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   check:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    runs-on: ubuntu-22.04
+    timeout-minutes: 8
 
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +22,9 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium --with-deps
 
       - name: Check tickets
         env:
