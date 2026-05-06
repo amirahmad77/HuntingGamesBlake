@@ -10,8 +10,8 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 8
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - uses: actions/checkout@v4
@@ -22,9 +22,7 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          playwright install chromium --with-deps
+        run: pip install -r requirements.txt
 
       - name: Check tickets
         env:
