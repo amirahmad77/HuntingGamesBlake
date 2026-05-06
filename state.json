@@ -20,5 +20,19 @@
     "status": "onsale",
     "sale_end": "2026-10-16T21:59:00Z",
     "last_check": "2026-05-06T13:13:02.689567"
+  },
+  "953422232:ticketmaster": {
+    "available": true,
+    "status": "onsale",
+    "source": "ticketmaster",
+    "sale_end": "2026-10-15T21:59:00Z",
+    "last_check": "2026-05-06T13:15:23.814870"
+  },
+  "352305340:ticketmaster": {
+    "available": true,
+    "status": "onsale",
+    "source": "ticketmaster",
+    "sale_end": "2026-10-16T21:59:00Z",
+    "last_check": "2026-05-06T13:15:23.814887"
   }
 }
