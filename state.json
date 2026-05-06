@@ -26,13 +26,13 @@
     "status": "onsale",
     "source": "ticketmaster",
     "sale_end": "2026-10-15T21:59:00Z",
-    "last_check": "2026-05-06T15:28:27.655085"
+    "last_check": "2026-05-06T17:06:41.683472"
   },
   "352305340:ticketmaster": {
     "available": true,
     "status": "onsale",
     "source": "ticketmaster",
     "sale_end": "2026-10-16T21:59:00Z",
-    "last_check": "2026-05-06T15:28:27.655104"
+    "last_check": "2026-05-06T17:06:41.683483"
   }
 }
