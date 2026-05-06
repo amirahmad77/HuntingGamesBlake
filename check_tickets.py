@@ -44,27 +44,50 @@ def save_state(state: dict):
     STATE_FILE.write_text(json.dumps(state, indent=2))
 
 
-def fetch_berlin_events() -> list[dict]:
-    resp = requests.get(
-        "https://app.ticketmaster.com/discovery/v2/events.json",
-        params={"apikey": TM_API_KEY, "keyword": "james blake", "countryCode": "DE"},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    all_events = resp.json().get("_embedded", {}).get("events", [])
-
+def _parse_events(raw: list) -> list[dict]:
     results = []
-    for ev in all_events:
+    for ev in raw:
         ev_url = ev.get("url", "")
         for tm_id, label in BERLIN_EVENTS.items():
             if tm_id in ev_url:
+                source = ev.get("source", {}).get("name", "ticketmaster")
                 results.append({
                     "tm_id": tm_id,
                     "label": label,
                     "url": ev_url,
                     "status": ev["dates"]["status"]["code"],
+                    "source": source,
                     "sale_end": ev.get("sales", {}).get("public", {}).get("endDateTime"),
                 })
+    return results
+
+
+def fetch_berlin_events() -> list[dict]:
+    seen_ids = set()
+    results = []
+
+    # Primary + all sources for DE
+    for source in ["ticketmaster,tmr,universe,frontgate", "tmr"]:
+        params = {"apikey": TM_API_KEY, "keyword": "james blake", "source": source}
+        if source != "tmr":
+            params["countryCode"] = "DE"
+
+        try:
+            resp = requests.get(
+                "https://app.ticketmaster.com/discovery/v2/events.json",
+                params=params,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            evs = resp.json().get("_embedded", {}).get("events", [])
+            for ev in _parse_events(evs):
+                key = f"{ev['tm_id']}:{ev['source']}"
+                if key not in seen_ids:
+                    seen_ids.add(key)
+                    results.append(ev)
+        except Exception as e:
+            print(f"  API query ({source}) failed: {e}")
+
     return results
 
 
@@ -89,36 +112,35 @@ def main():
     notifications = []
 
     for ev in events:
-        tm_id = ev["tm_id"]
+        key = f"{ev['tm_id']}:{ev['source']}"
         status = ev["status"]
         available = status in AVAILABLE_STATUSES
+        is_resale = ev["source"] == "tmr"
+        tag = "RESALE 🔄" if is_resale else "PRIMARY 🎫"
 
-        prev = state.get(tm_id, {})
+        prev = state.get(key, {})
         prev_available = prev.get("available")
         prev_status = prev.get("status", "unknown")
 
-        print(f"  {ev['label']}: {status} (was: {prev_status}) → available={available}")
+        print(f"  [{ev['source']}] {ev['label']}: {status} (was: {prev_status}) → available={available}")
 
-        # Alert: unavailable (or first run) → available
         if available and prev_available is not True:
             notifications.append(
-                f"🎫 <b>{ev['label']}</b>\n"
+                f"{tag} <b>{ev['label']}</b>\n"
                 f"Status: <b>{status.upper()}</b>\n"
                 f"🔗 {ev['url']}"
             )
 
-        # Alert: available → unavailable (sold out) — useful info too
         if prev_available is True and not available:
             notifications.append(
-                f"❌ <b>{ev['label']}</b>\n"
-                f"Now: <b>{status.upper()}</b> — check resale platforms\n"
-                f"Viagogo: https://www.viagogo.com/de\n"
-                f"Stubhub: https://www.stubhub.de"
+                f"❌ <b>{ev['label']}</b> [{ev['source']}] now <b>{status.upper()}</b>\n"
+                f"Check: viagogo.com/de · stubhub.de · ticketswap.de"
             )
 
-        state[tm_id] = {
+        state[key] = {
             "available": available,
             "status": status,
+            "source": ev["source"],
             "sale_end": ev["sale_end"],
             "last_check": datetime.now().isoformat(),
         }
