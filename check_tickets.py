@@ -7,7 +7,6 @@ from pathlib import Path
 
 import requests
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth_async
 
 TM_API_KEY = os.environ.get("TICKETMASTER_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -78,6 +77,40 @@ def discovery_api_check() -> dict:
     return result
 
 
+# ── Stealth patches (replaces playwright-stealth library) ─────────────────────
+
+STEALTH_JS = """
+() => {
+    // Remove webdriver flag
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+    // Fake plugins
+    Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5],
+    });
+
+    // Fake languages
+    Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en'],
+    });
+
+    // Override chrome object
+    window.chrome = { runtime: {} };
+
+    // Pass permissions query
+    const origQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters) =>
+        parameters.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission })
+            : origQuery(parameters);
+}
+"""
+
+
+async def apply_stealth(page):
+    await page.add_init_script(STEALTH_JS)
+
+
 # ── Tier 2: Playwright + stealth (full browser, real availability) ─────────────
 
 async def browser_check_event(page, event: dict) -> dict:
@@ -136,7 +169,7 @@ async def browser_check_all() -> dict:
             ),
         )
         page = await ctx.new_page()
-        await stealth_async(page)
+        await apply_stealth(page)
 
         for event in BERLIN_EVENTS:
             print(f"  Browser check: {event['label']}...")
