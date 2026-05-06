@@ -10,7 +10,6 @@ from playwright.async_api import async_playwright
 
 ARTIST_URL = "https://www.ticketmaster.de/artist/james-blake-tickets/765513"
 STATE_FILE = Path("state.json")
-
 BERLIN_DATES = ["15/10/2026", "16/10/2026"]
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -22,7 +21,11 @@ def send_telegram(message: str):
         print(f"[NOTIFY] {message}")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    resp = requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}, timeout=10)
+    resp = requests.post(
+        url,
+        json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"},
+        timeout=10,
+    )
     if not resp.ok:
         print(f"Telegram error: {resp.text}")
 
@@ -40,23 +43,57 @@ def save_state(state: dict):
 async def scrape_events() -> list[dict]:
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        ctx = await browser.new_context(locale="en-US")
+        ctx = await browser.new_context(
+            locale="en-US",
+            user_agent=(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
+        )
         page = await ctx.new_page()
-        await page.goto(ARTIST_URL, wait_until="networkidle", timeout=40000)
+        await page.goto(ARTIST_URL, wait_until="domcontentloaded", timeout=40000)
+
+        # Dismiss GDPR consent popup if present
+        try:
+            await page.wait_for_selector(
+                'button[id*="accept"], button[class*="accept"], '
+                'button:has-text("Accept"), button:has-text("Akzeptieren"), '
+                'button:has-text("Accept All"), button:has-text("I Accept")',
+                timeout=5000,
+            )
+            btn = await page.query_selector(
+                'button[id*="accept"], button[class*="accept"], '
+                'button:has-text("Accept"), button:has-text("Akzeptieren"), '
+                'button:has-text("Accept All"), button:has-text("I Accept")'
+            )
+            if btn:
+                await btn.click()
+                print("Dismissed consent popup.")
+        except Exception:
+            pass
+
+        # Wait for event listings to load
+        try:
+            await page.wait_for_selector('a[href*="/event/"]', timeout=20000)
+        except Exception:
+            print("Timeout waiting for event links — saving debug screenshot.")
+            await page.screenshot(path="debug.png", full_page=True)
+            return []
+
+        await asyncio.sleep(2)
 
         events = await page.evaluate("""
             () => {
-                const btns = Array.from(document.querySelectorAll('a, button'))
-                    .filter(el => el.innerText && el.innerText.toLowerCase().includes('ticket'));
-
+                const btns = Array.from(document.querySelectorAll('a[href*="/event/"]'));
                 return btns.map(b => {
                     const text = b.innerText.trim();
-                    // Find nearest status badge in parent
+                    const parent = b.closest('li') || b.closest('article') || b.parentElement?.parentElement?.parentElement;
                     let status = null;
-                    const parent = b.closest('[class*="sc-"]') || b.parentElement?.parentElement;
                     if (parent) {
                         const badge = parent.querySelector('[class*="Badge__Label"]');
                         if (badge) status = badge.innerText.trim();
+                        // Also check for sold out text anywhere in parent
+                        if (!status && parent.innerText.includes('Sold Out')) status = 'SOLD OUT';
                     }
                     return { text, href: b.href || '', status };
                 });
@@ -64,6 +101,10 @@ async def scrape_events() -> list[dict]:
         """)
 
         await browser.close()
+        print(f"Raw events scraped: {len(events)}")
+        for ev in events:
+            if "Berlin" in ev.get("text", "") or "Berlin" in ev.get("href", ""):
+                print(f"  Berlin hit: {ev}")
         return events
 
 
@@ -71,18 +112,17 @@ def parse_berlin_events(raw: list[dict]) -> list[dict]:
     results = []
     for ev in raw:
         text = ev.get("text", "")
-        if "Berlin" not in text:
+        href = ev.get("href", "")
+        if "Berlin" not in text and "Berlin" not in href:
             continue
         for date in BERLIN_DATES:
             if date not in text:
                 continue
-            # Determine availability
             status = ev.get("status") or ""
-            href = ev.get("href", "")
-            if "Sold Out" in text or "sold out" in status.lower():
+            if "Sold Out" in text or "sold out" in status.lower() or status == "SOLD OUT":
                 available = False
                 status_label = "SOLD OUT"
-            elif "Find tickets" in text or "tickets" in text.lower():
+            elif href and ("/event/" in href):
                 available = True
                 status_label = status if status else "AVAILABLE"
             else:
@@ -108,9 +148,11 @@ async def main():
         sys.exit(1)
 
     events = parse_berlin_events(raw)
+    print(f"Berlin events parsed: {events}")
 
     if not events:
-        print("No Berlin events found on page — structure may have changed.")
+        print("No Berlin events found — page structure may have changed or events sold out/removed.")
+        save_state(load_state())  # ensure state.json exists
         sys.exit(0)
 
     state = load_state()
@@ -120,14 +162,16 @@ async def main():
         key = ev["date"]
         prev = state.get(key, {}).get("available")
         curr = ev["available"]
+        print(f"  {key}: {ev['status']} (prev={prev} → now={curr})")
 
-        print(f"  {key}: {ev['status']} (was: {prev})")
-
-        # Alert when:  not previously available (or unknown) → now available
         if curr and prev is not True:
             changed.append(ev)
 
-        state[key] = {"available": curr, "status": ev["status"], "last_check": datetime.now().isoformat()}
+        state[key] = {
+            "available": curr,
+            "status": ev["status"],
+            "last_check": datetime.now().isoformat(),
+        }
 
     save_state(state)
 
@@ -136,10 +180,11 @@ async def main():
         for ev in changed:
             lines.append(f"📅 <b>{ev['date']}</b> — {ev['status']}")
             lines.append(f"🔗 {ev['url']}\n")
-        send_telegram("\n".join(lines))
-        print("Notification sent.")
+        msg = "\n".join(lines)
+        send_telegram(msg)
+        print("Telegram notification sent.")
     else:
-        print("No state change — no notification sent.")
+        print("No change in availability — no notification sent.")
 
 
 asyncio.run(main())

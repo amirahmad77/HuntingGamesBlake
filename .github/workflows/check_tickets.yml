@@ -34,10 +34,18 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python check_tickets.py
 
+      - name: Upload debug screenshot (if any)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshot
+          path: debug.png
+          if-no-files-found: ignore
+
       - name: Commit state
         run: |
           git config user.name "ticket-bot"
           git config user.email "bot@noreply"
-          git add state.json
+          git add state.json || true
           git diff --cached --quiet || git commit -m "chore: update ticket state"
-          git push
+          git push || true
