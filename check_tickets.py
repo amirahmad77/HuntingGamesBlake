@@ -155,8 +155,11 @@ async def browser_check_event(page, event: dict) -> dict:
     """)
 
 
+ARTIST_URL = "https://www.ticketmaster.de/artist/james-blake-tickets/765513"
+
+
 async def browser_check_all() -> dict:
-    """Returns {tm_id: {soldOut, limitedAvailability, resaleEnabled, resaleCount}}"""
+    """Load artist page (less guarded than event pages) and extract soldOut per event."""
     results = {}
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -171,15 +174,44 @@ async def browser_check_all() -> dict:
         page = await ctx.new_page()
         await apply_stealth(page)
 
-        for event in BERLIN_EVENTS:
-            print(f"  Browser check: {event['label']}...")
-            try:
-                data = await browser_check_event(page, event)
-                results[event["tm_id"]] = data
-                print(f"    soldOut={data['soldOut']} resaleCount={data['resaleCount']} raw={data['resaleResultsRaw']}")
-            except Exception as e:
-                print(f"    Browser check failed: {e}")
-                results[event["tm_id"]] = None
+        print("  Loading artist page...")
+        try:
+            await page.goto(ARTIST_URL, wait_until="networkidle", timeout=40000)
+
+            events_data = await page.evaluate("""
+                () => {
+                    const el = document.getElementById('__NEXT_DATA__');
+                    if (!el) return null;
+                    const state = JSON.parse(el.textContent).props.pageProps.initialReduxState;
+                    const api = state.api || [];
+                    return api.map(ev => ({
+                        id: ev.id,
+                        soldOut: ev.soldOut,
+                        limitedAvailability: ev.limitedAvailability,
+                        cancelled: ev.cancelled,
+                        url: ev.url,
+                    }));
+                }
+            """)
+
+            if events_data:
+                print(f"  Artist page returned {len(events_data)} events")
+                for ev in events_data:
+                    for be in BERLIN_EVENTS:
+                        if ev["id"] == be["tm_id"]:
+                            results[be["tm_id"]] = {
+                                "soldOut": ev["soldOut"],
+                                "limitedAvailability": ev["limitedAvailability"],
+                                "resaleEnabled": None,
+                                "resaleCount": 0,
+                                "resaleResultsRaw": [],
+                            }
+                            print(f"    {be['label']}: soldOut={ev['soldOut']} limited={ev['limitedAvailability']}")
+            else:
+                print("  Artist page: no __NEXT_DATA__ (bot-blocked or structure changed)")
+
+        except Exception as e:
+            print(f"  Artist page browser check failed: {e}")
 
         await browser.close()
     return results
