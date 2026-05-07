@@ -10,8 +10,8 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    runs-on: ubuntu-22.04
+    timeout-minutes: 8
 
     steps:
       - uses: actions/checkout@v4
@@ -24,11 +24,16 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Install Playwright browsers
+        run: playwright install chromium --with-deps
+
       - name: Check tickets
         env:
           TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NORDVPN_USER: ${{ secrets.NORDVPN_USER }}
+          NORDVPN_PASS: ${{ secrets.NORDVPN_PASS }}
         run: python check_tickets.py
 
       - name: Commit state
