@@ -34,6 +34,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           NORDVPN_USER: ${{ secrets.NORDVPN_USER }}
           NORDVPN_PASS: ${{ secrets.NORDVPN_PASS }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python check_tickets.py
 
       - name: Commit state

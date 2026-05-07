@@ -1,20 +1,23 @@
 import asyncio
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
 
 import requests
+from anthropic import Anthropic
 from playwright.async_api import async_playwright
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
-TM_API_KEY         = os.environ.get("TICKETMASTER_API_KEY")
-NORDVPN_USER       = os.environ.get("NORDVPN_USER")
-NORDVPN_PASS       = os.environ.get("NORDVPN_PASS")
+TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID    = os.environ.get("TELEGRAM_CHAT_ID")
+TM_API_KEY          = os.environ.get("TICKETMASTER_API_KEY")
+NORDVPN_USER        = os.environ.get("NORDVPN_USER")
+NORDVPN_PASS        = os.environ.get("NORDVPN_PASS")
+ANTHROPIC_API_KEY   = os.environ.get("ANTHROPIC_API_KEY")
 
 STATE_FILE = Path("state.json")
 
@@ -148,6 +151,55 @@ async def browser_check(event: dict, page) -> dict:
     }""")
 
 
+# ── Tier 3: LLM page-text fallback ────────────────────────────────────────────
+
+async def llm_fallback_check(event: dict, page) -> dict:
+    """Read visible page text → ask Claude Haiku if fan resale tickets exist."""
+    if not ANTHROPIC_API_KEY:
+        print("    No ANTHROPIC_API_KEY — skipping LLM fallback")
+        return {"ok": False, "error": "no_api_key"}
+
+    try:
+        body_text = await page.inner_text("body", timeout=8000)
+        body_text = body_text[:7000]  # ~1.75K tokens — enough for ticket sections
+
+        client = Anthropic(api_key=ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=120,
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Ticketmaster event page text for: {event['label']}\n\n"
+                    f"{body_text}\n\n"
+                    "Are fan-to-fan / resale tickets available to buy on this page right now? "
+                    "Look for resale listings, prices, 'Fan-zu-Fan', 'Resale', seat listings. "
+                    'Reply JSON only: {"resale_available": true|false, "count": <int or null>, "note": "<10 words>"}'
+                ),
+            }],
+        )
+        raw = msg.content[0].text
+        m = re.search(r"\{.*?\}", raw, re.DOTALL)
+        if m:
+            parsed = json.loads(m.group())
+            avail = bool(parsed.get("resale_available"))
+            count = parsed.get("count") or (1 if avail else 0)
+            note  = parsed.get("note", "")
+            print(f"    LLM fallback: resale_available={avail} count={count} note={note!r}")
+            return {
+                "ok":           True,
+                "soldOut":      True,
+                "limited":      False,
+                "resaleEnabled": avail,
+                "resaleCount":  count,
+                "resaleStage":  "llm",
+            }
+    except Exception as e:
+        print(f"    LLM fallback error: {e}")
+
+    return {"ok": False, "error": "llm_failed"}
+
+
 async def browser_check_all() -> dict:
     results = {}
 
@@ -183,8 +235,12 @@ async def browser_check_all() -> dict:
             print(f"  Loading: {ev['label']} ...")
             try:
                 data = await browser_check(ev, page)
+                if not data.get("ok"):
+                    print(f"    __NEXT_DATA__ failed ({data.get('error')}) — LLM fallback...")
+                    data = await llm_fallback_check(ev, page)
                 results[ev["tm_id"]] = data
-                print(f"    soldOut={data.get('soldOut')} "
+                src = "llm" if data.get("resaleStage") == "llm" else "next_data"
+                print(f"    [{src}] soldOut={data.get('soldOut')} "
                       f"limited={data.get('limited')} "
                       f"resaleCount={data.get('resaleCount')} "
                       f"resaleEnabled={data.get('resaleEnabled')}")
